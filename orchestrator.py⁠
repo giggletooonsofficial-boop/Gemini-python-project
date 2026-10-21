@@ -1,0 +1,124 @@
+import asyncio
+from sqlmodel import Session, select
+from database import engine
+from models import Meeting, Agent, Message
+from adapters import get_adapter
+
+async def run_meeting_workflow(meeting_id: int):
+    """Executes the multi-agent meeting workflow asynchronously."""
+    with Session(engine) as session:
+        meeting = session.get(Meeting, meeting_id)
+        if not meeting:
+            return
+            
+        meeting.status = "active"
+        session.add(meeting)
+        session.commit()
+
+        agents = session.exec(select(Agent).where(Agent.meeting_id == meeting_id)).all()
+        
+        try:
+            # PHASE 1: OPENING STATEMENTS
+            await _run_phase(session, meeting, agents, "Opening", "Please provide your initial analysis of the objective.")
+            
+            # PHASE 2: DISCUSSION & REVIEW
+            await _run_phase(session, meeting, agents, "Discussion", "Review the opening statements and provide counterarguments or support.")
+            
+            # PHASE 3: SYNTHESIS
+            # We select the Lead Coordinator to synthesize
+            lead = next((a for a in agents if "Lead" in a.role), agents[0])
+            await _run_phase(session, meeting, [lead], "Synthesis", "Synthesize the discussion into a final actionable report.")
+
+            meeting.status = "completed"
+        except Exception as e:
+            meeting.status = f"failed: {str(e)}"
+        finally:
+            session.add(meeting)
+            session.commit()
+
+async def _run_phase(session: Session, meeting: Meeting, agents: list[Agent], phase: str, prompt_context: str):
+    """Runs a single phase of the meeting, gathering inputs from agents concurrently."""
+    
+    # Save a system message to indicate phase change
+    sys_msg = Message(meeting_id=meeting.id, agent_name="System", phase=phase, content=f"--- Starting Phase: {phase} ---")
+    session.add(sys_msg)
+    session.commit()
+
+    async def get_agent_reply(agent: Agent):
+        adapter = get_adapter(agent.provider, agent.name, agent.role)
+        system_prompt = f"You are {agent.name}, acting as the {agent.role}."
+        reply = await adapter.generate_response(system_prompt, f"{phase}: {prompt_context}. Objective: {meeting.objective}")
+        return Message(meeting_id=meeting.id, agent_name=agent.name, phase=phase, content=reply)
+
+    # Execute all agent generation tasks concurrently
+    tasks = [get_agent_reply(agent) for agent in agents]
+    messages = await asyncio.gather(*tasks)
+
+    for msg in messages:
+        session.add(msg)
+    session.commit()
+    
+    # Small pause between phases for UI readability
+    await asyncio.sleep(1)
+import asyncio
+from sqlmodel import Session, select
+from database import engine
+from models import Meeting, Agent, Message
+from adapters import get_adapter
+
+async def run_meeting_workflow(meeting_id: int):
+    """Executes the multi-agent meeting workflow asynchronously."""
+    with Session(engine) as session:
+        meeting = session.get(Meeting, meeting_id)
+        if not meeting:
+            return
+            
+        meeting.status = "active"
+        session.add(meeting)
+        session.commit()
+
+        agents = session.exec(select(Agent).where(Agent.meeting_id == meeting_id)).all()
+        
+        try:
+            # PHASE 1: OPENING STATEMENTS
+            await _run_phase(session, meeting, agents, "Opening", "Please provide your initial analysis of the objective.")
+            
+            # PHASE 2: DISCUSSION & REVIEW
+            await _run_phase(session, meeting, agents, "Discussion", "Review the opening statements and provide counterarguments or support.")
+            
+            # PHASE 3: SYNTHESIS
+            # We select the Lead Coordinator to synthesize
+            lead = next((a for a in agents if "Lead" in a.role), agents[0])
+            await _run_phase(session, meeting, [lead], "Synthesis", "Synthesize the discussion into a final actionable report.")
+
+            meeting.status = "completed"
+        except Exception as e:
+            meeting.status = f"failed: {str(e)}"
+        finally:
+            session.add(meeting)
+            session.commit()
+
+async def _run_phase(session: Session, meeting: Meeting, agents: list[Agent], phase: str, prompt_context: str):
+    """Runs a single phase of the meeting, gathering inputs from agents concurrently."""
+    
+    # Save a system message to indicate phase change
+    sys_msg = Message(meeting_id=meeting.id, agent_name="System", phase=phase, content=f"--- Starting Phase: {phase} ---")
+    session.add(sys_msg)
+    session.commit()
+
+    async def get_agent_reply(agent: Agent):
+        adapter = get_adapter(agent.provider, agent.name, agent.role)
+        system_prompt = f"You are {agent.name}, acting as the {agent.role}."
+        reply = await adapter.generate_response(system_prompt, f"{phase}: {prompt_context}. Objective: {meeting.objective}")
+        return Message(meeting_id=meeting.id, agent_name=agent.name, phase=phase, content=reply)
+
+    # Execute all agent generation tasks concurrently
+    tasks = [get_agent_reply(agent) for agent in agents]
+    messages = await asyncio.gather(*tasks)
+
+    for msg in messages:
+        session.add(msg)
+    session.commit()
+    
+    # Small pause between phases for UI readability
+    await asyncio.sleep(1)
