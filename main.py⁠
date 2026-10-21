@@ -1,0 +1,67 @@
+from fastapi import FastAPI, Depends, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from sqlmodel import Session, select
+from database import create_db_and_tables, get_session
+from models import Meeting, Agent, Message, MeetingResponse
+from orchestrator import run_meeting_workflow
+from pydantic import BaseModel
+
+app = FastAPI(title="Global AI Council")
+
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
+# Serve frontend
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def read_index():
+    return FileResponse("static/index.html")
+
+class MeetingCreate(BaseModel):
+    objective: str
+
+@app.post("/api/meetings")
+def create_meeting(request: MeetingCreate, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
+    # 1. Create the meeting
+    meeting = Meeting(objective=request.objective)
+    session.add(meeting)
+    session.commit()
+    session.refresh(meeting)
+
+    # 2. Assign the default Council Roles (Phase 1 Simulated)
+    roles = [
+        {"name": "Alpha", "role": "Lead Coordinator"},
+        {"name": "Beta", "role": "Security Analyst"},
+        {"name": "Gamma", "role": "Critical Reviewer"}
+    ]
+    
+    for r in roles:
+        agent = Agent(name=r["name"], role=r["role"], provider="simulated", meeting_id=meeting.id)
+        session.add(agent)
+    session.commit()
+
+    # 3. Trigger the asynchronous workflow engine
+    background_tasks.add_task(run_meeting_workflow, meeting.id)
+
+    return {"meeting_id": meeting.id, "status": "pending"}
+
+@app.get("/api/meetings/{meeting_id}", response_model=MeetingResponse)
+def get_meeting(meeting_id: int, session: Session = Depends(get_session)):
+    meeting = session.get(Meeting, meeting_id)
+    if not meeting:
+        return {"error": "Meeting not found"}
+    
+    agents = session.exec(select(Agent).where(Agent.meeting_id == meeting_id)).all()
+    messages = session.exec(select(Message).where(Message.meeting_id == meeting_id).order_by(Message.timestamp)).all()
+    
+    return MeetingResponse(
+        id=meeting.id,
+        objective=meeting.objective,
+        status=meeting.status,
+        created_at=meeting.created_at,
+        agents=agents,
+        messages=messages
+    )
