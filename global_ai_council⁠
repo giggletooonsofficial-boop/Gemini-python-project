@@ -1,0 +1,11 @@
+global_ai_council/
+├── requirements.txt
+├── database.py
+├── models.py
+├── adapters.py
+├── orchestrator.py
+├── main.py
+├── test_main.py
+├── static/
+│   └── index.html
+└── README.md
